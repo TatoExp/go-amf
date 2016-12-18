@@ -23,7 +23,8 @@ const (
 )
 
 const (
-	amf3Null         byte = 0x01
+	amf3Undefined    byte = 0x00
+	amf3Null              = 0x01
 	amf3False             = 0x02
 	amf3True              = 0x03
 	amf3Integer           = 0x04

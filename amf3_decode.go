@@ -14,6 +14,8 @@ func DecodeAMF3(v []byte) (interface{}, error) {
 
 func decodeAMF3(v []byte) (interface{}, int, error) {
 	switch v[0] {
+	case amf3Undefined:
+		return nil, 1, nil
 	case amf3Null:
 		return nil, 1, nil
 	case amf3False:
@@ -63,7 +65,7 @@ func decodeInteger3(v []byte) (int, int, error) {
 	if n&0x10000000 != 0 {
 		n -= 0x20000000
 	}
-	return n, l, nil
+	return n, 1 + l, nil
 }
 
 func decodeDouble3(v []byte) (float64, int, error) {
@@ -75,6 +77,7 @@ func decodeString3(v []byte) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
+	strlen >>= 1
 	return string(v[1+l:]), 1 + l + strlen, nil
 }
 
