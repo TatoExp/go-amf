@@ -35,7 +35,7 @@ func EncodeAMF3(v interface{}) []byte {
 	return nil
 }
 
-func encodeU29(v uint) []byte {
+func encodeU29(v int) []byte {
 	msg := make([]byte, 0, 4)
 	v &= 0x1fffffff
 	if v <= 0x7f {
@@ -51,7 +51,7 @@ func encodeU29(v uint) []byte {
 		msg = append(msg, byte((v>>22)|0x80))
 		msg = append(msg, byte((v>>14)|0x80))
 		msg = append(msg, byte((v>>7)|0x80))
-		msg = append(msg, byte(v&0x7f))
+		msg = append(msg, byte(v))
 	}
 	return msg
 }
@@ -60,7 +60,7 @@ func encodeInteger3(v int) []byte {
 	if v >= amf3MinInt && v <= amf3MaxInt {
 		msg := make([]byte, 0, 1+4) // 1 header + up to 4 U29
 		msg = append(msg, amf3Integer)
-		msg = append(msg, encodeU29(uint(v))...)
+		msg = append(msg, encodeU29(v)...)
 		return msg
 	} else {
 		return encodeDouble3(float64(v))
@@ -94,7 +94,7 @@ func encodeString3(v string) []byte {
 	}
 	var msg []byte
 	msg = append(msg, amf3String)
-	msg = append(msg, encodeU29(uint((strlen<<1)|1))...)
+	msg = append(msg, encodeU29((strlen<<1)|1)...)
 	msg = append(msg, []byte(v)[:strlen]...)
 	return msg
 }
