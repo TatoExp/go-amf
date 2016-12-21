@@ -3,7 +3,7 @@ package amf
 import (
 	"bytes"
 	"encoding/binary"
-	"math"
+	"io"
 	"sort"
 	"time"
 )
@@ -22,21 +22,21 @@ func EncodeAMF0(v interface{}) []byte {
 		return encodeNull()
 	case map[string]interface{}:
 		return encodeObject(v.(map[string]interface{}))
-	case Amf0ECMAArray:
-		return encodeECMAArray(v.(Amf0ECMAArray))
+	case ECMAArray:
+		return encodeECMAArray(v.(ECMAArray))
 	case time.Time:
 		return encodeDate(v.(time.Time))
 	case []interface{}:
-		return encodeStrictArr(v.([]interface{}))
+		return encodeStrictArray(v.([]interface{}))
 	}
 	return nil
 }
 
 func encodeNumber(v float64) []byte {
-	msg := make([]byte, 1+8) // 1 header + 8 float64
-	msg[0] = amf0Number
-	binary.BigEndian.PutUint64(msg[1:], uint64(math.Float64bits(v)))
-	return msg
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf0Number)
+	binary.Write(buf, binary.BigEndian, v)
+	return buf.Bytes()
 }
 
 func encodeBoolean(v bool) []byte {
@@ -50,24 +50,27 @@ func encodeBoolean(v bool) []byte {
 	return msg
 }
 
+func encodeUTF8(w io.Writer, v string) {
+	binary.Write(w, binary.BigEndian, uint16(len(v)))
+	w.Write([]byte(v))
+}
+
 func encodeString(v string) []byte {
-	var msg []byte
+	buf := new(bytes.Buffer)
 	if len(v) < 0xffff {
-		msg = make([]byte, 1+2+len(v)) // 1 header + 2 length + length of string
-		msg[0] = amf0String
-		binary.BigEndian.PutUint16(msg[1:], uint16(len(v)))
-		copy(msg[3:], v)
+		buf.WriteByte(amf0String)
+		encodeUTF8(buf, v)
 	} else {
-		msg = make([]byte, 1+4+len(v)) // 1 header + 4 length + length of string
-		msg[0] = amf0StringExt
-		binary.BigEndian.PutUint32(msg[1:], uint32(len(v)))
-		copy(msg[5:], v)
+		buf.WriteByte(amf0StringExt)
+		binary.Write(buf, binary.BigEndian, uint32(len(v)))
+		buf.Write([]byte(v))
 	}
-	return msg
+	return buf.Bytes()
 }
 
 func encodeObject(v map[string]interface{}) []byte {
 	buf := new(bytes.Buffer)
+	buf.WriteByte(amf0Object)
 	var keys []string
 	for k := range v {
 		keys = append(keys, k)
@@ -75,79 +78,50 @@ func encodeObject(v map[string]interface{}) []byte {
 	sort.Strings(keys)
 	for _, key := range keys {
 		value := v[key]
-		buf.Write(EncodeAMF0(key))
-		switch value.(type) {
-		case int:
-			buf.Write(EncodeAMF0(value.(int)))
-		case float64:
-			buf.Write(EncodeAMF0(value.(float64)))
-		case string:
-			buf.Write(EncodeAMF0(value.(string)))
-		case bool:
-			buf.Write(EncodeAMF0(value.(bool)))
-		case time.Time:
-			buf.Write(EncodeAMF0(value.(time.Time)))
-		case nil:
-			buf.Write(EncodeAMF0(nil))
-		}
+		encodeUTF8(buf, key)
+		buf.Write(EncodeAMF0(value))
 	}
-	buf.Write(encodeObjectEnd())
-	msg := make([]byte, 1+buf.Len()) // 1 header + length
-	msg[0] = amf0Object
-	copy(msg[1:], buf.Bytes())
-	return msg
+	encodeUTF8(buf, "")
+	buf.WriteByte(amf0ObjectEnd)
+	return buf.Bytes()
 }
 
 func encodeNull() []byte {
 	return []byte{amf0Null}
 }
 
-func encodeECMAArray(v Amf0ECMAArray) []byte {
-	msg_body := encodeObject(v)
-	summary_length := len(msg_body) - 4
-	msg := make([]byte, 1+4+summary_length) // 1 header + 4 length + sum length
-	msg[0] = amf0Array
-	binary.BigEndian.PutUint32(msg[1:], uint32(len(v)))
-	copy(msg[5:], msg_body[1:summary_length+1])
-	return msg
-}
-
-func encodeObjectEnd() []byte {
-	return []byte{0x00, 0x00, amf0ObjectEnd}
+func encodeECMAArray(v ECMAArray) []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf0Array)
+	var keys []string
+	for k := range v {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	binary.Write(buf, binary.BigEndian, uint32(len(keys)))
+	for _, key := range keys {
+		value := v[key]
+		encodeUTF8(buf, key)
+		buf.Write(EncodeAMF0(value))
+	}
+	return buf.Bytes()
 }
 
 func encodeDate(v time.Time) []byte {
-	msg := make([]byte, 1+8+2) // 1 header + 8 float64 + 2 timezone
-	msg[0], msg[9], msg[10] = amf0Date, 0x0, 0x0
-	binary.BigEndian.PutUint64(msg[1:], uint64(v.UnixNano()/1000000))
-	return msg
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf0Date)
+	binary.Write(buf, binary.BigEndian, float64(v.UnixNano()/1000000))
+	buf.WriteByte(0x00)
+	buf.WriteByte(0x00)
+	return buf.Bytes()
 }
 
-func encodeStrictArr(v []interface{}) []byte {
+func encodeStrictArray(v []interface{}) []byte {
 	buf := new(bytes.Buffer)
-	StringExt := false
-	for _, k := range v {
-		switch k.(type) {
-		case string:
-			if len(k.(string)) > 0xffff {
-				StringExt = true
-			}
-		}
+	buf.WriteByte(amf0StrictArr)
+	binary.Write(buf, binary.BigEndian, uint32(len(v)))
+	for _, value := range v {
+		buf.Write(EncodeAMF0(value))
 	}
-	for _, k := range v {
-		if StringExt {
-			msg := make([]byte, 1+4+len(k.(string))) // 1 header + 4 length + length of string
-			msg[0] = amf0StringExt
-			binary.BigEndian.PutUint32(msg[1:], uint32(len(k.(string))))
-			copy(msg[5:], k.(string))
-			buf.Write(msg)
-			continue
-		}
-		buf.Write(EncodeAMF0(k))
-	}
-	msg := make([]byte, 1+8+buf.Len()) // 1 header + 8 array count + length
-	msg[0] = amf0StrictArr
-	binary.BigEndian.PutUint32(msg[1:], uint32(len(v)))
-	copy(msg[9:], buf.Bytes())
-	return msg
+	return buf.Bytes()
 }

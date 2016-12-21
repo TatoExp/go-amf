@@ -4,9 +4,15 @@ import (
 	"encoding/binary"
 	"math"
 	"time"
+	"fmt"
 )
 
-func DecodeAMF0(v []byte) interface{} {
+func DecodeAMF0(v []byte) (interface{}, error) {
+	result, _, err := decodeAMF0(v)
+	return result, err
+}
+
+func decodeAMF0(v []byte) (interface{}, int, error) {
 	switch v[0] {
 	case amf0Number:
 		return decodeNumber(v)
@@ -17,106 +23,110 @@ func DecodeAMF0(v []byte) interface{} {
 	case amf0Object:
 		return decodeObject(v)
 	case amf0Null:
-		return nil
+		return nil, 1, nil
+	case amf0Undefined:
+		return nil, 1, nil
 	case amf0Array:
 		return decodeECMAArray(v)
 	case amf0StrictArr:
-		return decodeStrictArr(v)
+		return decodeStrictArray(v)
 	case amf0Date:
 		return decodeDate(v)
 	}
-	return nil
+	return nil, 0, fmt.Errorf("unsupported type 0x%0X", v[0])
 }
 
-func decodeNumber(v []byte) float64 {
-	return math.Float64frombits(binary.BigEndian.Uint64(v[1:]))
+func decodeNumber(v []byte) (float64, int, error) {
+	return math.Float64frombits(binary.BigEndian.Uint64(v[1:9])), 9, nil
 }
 
-func decodeBoolean(v []byte) bool {
+func decodeBoolean(v []byte) (bool, int, error) {
 	if v[1] == 0x1 {
-		return true
+		return true, 2, nil
 	} else {
-		return false
+		return false, 2, nil
 	}
 }
 
-func decodeString(v []byte) string {
+func decodeUTF8(v []byte) (string, int) {
+	strlen := int(binary.BigEndian.Uint16(v[:2]))
+	s := string(v[2:2+strlen])
+	return s, 2+strlen
+}
+
+func decodeString(v []byte) (string, int, error) {
 	if v[0] == amf0String {
-		return string(v[3:])
+		s, n := decodeUTF8(v[1:])
+		return s, 1+n, nil
+	} else if v[0] == amf0StringExt {
+		strlen := int(binary.BigEndian.Uint32(v[1:5]))
+		s := string(v[5:5+strlen])
+		return s, 5+strlen, nil
 	} else {
-		return string(v[5:])
+		return "", 0, fmt.Errorf("invalid string tag")
 	}
 }
 
-func decodeECMAArray(v []byte) Amf0ECMAArray {
-	data := make([]byte, len(v)-4)
-	data[0] = amf0Object
-	copy(data[1:], v[5:])
-	return Amf0ECMAArray(DecodeAMF0(data).(map[string]interface{}))
+func decodeECMAArray(v []byte) (ECMAArray, int, error) {
+	result := make(map[string]interface{})
+	num := binary.BigEndian.Uint32(v[1:5])
+	offset := 5
+	for i := uint32(0); i < num; i++ {
+		key, nkey := decodeUTF8(v[offset:])
+		offset += nkey
+		value, nvalue, err := decodeAMF0(v[offset:])
+		if err != nil {
+			return nil, 0, err
+		}
+		offset += nvalue
+		result[key] = value
+	}
+	return ECMAArray(result), offset, nil
 }
 
-func decodeStrictArr(v []byte) interface{} {
-	elem_len := uint(len(v)-9) / uint(binary.BigEndian.Uint32(v[1:9]))
-	var arr []interface{}
-	if v[9] == amf0String {
-		for position := uint(10); position < uint(len(v))-1; {
-			elem_len = uint(binary.BigEndian.Uint16(v[position : position+2]))
-			arr = append(arr, DecodeAMF0(v[position-1:position+elem_len+2]))
-			position += 3 + elem_len
+func decodeStrictArray(v []byte) ([]interface{}, int, error) {
+	result := make([]interface{}, 0)
+	num := binary.BigEndian.Uint32(v[1:5])
+	offset := 5
+	for i := uint32(0); i < num; i++ {
+		value, nvalue, err := decodeAMF0(v[offset:])
+		if err != nil {
+			return nil, 0, err
 		}
-		return arr
+		offset += nvalue
+		result = append(result, value)
 	}
-	if v[9] == amf0StringExt {
-		for position := uint(10); position < uint(len(v))-1; {
-			elem_len = uint(binary.BigEndian.Uint32(v[position : position+4]))
-			arr = append(arr, DecodeAMF0(v[position-1:position+elem_len+4]))
-			position += 5 + elem_len
-		}
-		return arr
-	}
-	for position := uint(9); position < uint(len(v))-1; position += elem_len {
-		arr = append(arr, DecodeAMF0(v[position:position+elem_len]))
-	}
-	return arr
+	return result, offset, nil
 }
 
-func decodeDate(v []byte) time.Time {
-	return time.Unix(0, int64(binary.BigEndian.Uint64(v[1:9])*1000000))
+func decodeDate(v []byte) (time.Time, int, error) {
+	t := int64(math.Float64frombits(binary.BigEndian.Uint64(v[1:9]))*1000000)
+	if v[9] != 0x00 || v[10] != 0x00 {
+		return time.Unix(0, 0), 0, fmt.Errorf("invalid timezone")
+	}
+	return time.Unix(0, t), 11, nil
 }
 
-func decodeObject(v []byte) map[string]interface{} {
-	msg := make(map[string]interface{})
-	for position := 1; position < len(v)-1; {
-		if v[position] == byte(0x00) &&
-			v[position+1] == byte(0x00) &&
-			v[position+2] == byte(0x09) {
-			break
+func decodeObject(v []byte) (map[string]interface{}, int, error) {
+	result := make(map[string]interface{})
+	offset := 1
+	for {
+		key, nkey := decodeUTF8(v[offset:])
+		offset += nkey
+		if key == "" {
+			if v[offset] == byte(amf0ObjectEnd) {
+				offset++
+				break
+			} else {
+				return nil, 0, fmt.Errorf("invalid end of object")
+			}
 		}
-		elem_len := int(binary.BigEndian.Uint16(v[position+1 : position+3]))
-		key := DecodeAMF0(v[position : position+3+elem_len])
-		position += 3 + elem_len
-		switch v[position] {
-		case amf0Number:
-			msg[key.(string)] = DecodeAMF0(v[position : position+9])
-			position += 9
-		case amf0Boolean:
-			msg[key.(string)] = DecodeAMF0(v[position : position+2])
-			position += 2
-		case amf0String:
-			elem_len := int(binary.BigEndian.Uint16(v[position+1 : position+3]))
-			msg[key.(string)] = DecodeAMF0(v[position : position+3+elem_len])
-			position += 3 + elem_len
-		case amf0Null:
-			msg[key.(string)] = nil
-			position += 1
-		case amf0Date:
-			msg[key.(string)] = DecodeAMF0(v[position : position+11])
-			position += 11
-		case amf0StringExt:
-			elem_len := int(binary.BigEndian.Uint32(v[position+1 : position+5]))
-			msg[key.(string)] = DecodeAMF0(v[position : position+5+elem_len])
-			position += 5 + elem_len
+		value, nvalue, err := decodeAMF0(v[offset:])
+		if err != nil {
+			return nil, 0, err
 		}
+		offset += nvalue
+		result[key] = value
 	}
-	return msg
+	return result, offset, nil
 }

@@ -1,8 +1,11 @@
 package amf
 
 import (
+	"bytes"
 	"encoding/binary"
+	"io"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -26,42 +29,36 @@ func EncodeAMF3(v interface{}) []byte {
 	case nil:
 		return encodeNull3()
 	// case map[string]interface{}:
-	// 	return encodeObject3(v.(map[string]interface{}))
+		// return encodeObject3(v.(map[string]interface{}))
 	case time.Time:
 		return encodeDate3(v.(time.Time))
-		// case []interface{}:
-		// 	return encodeStrictArr3(v.([]interface{}))
+	case ECMAArray:
+		return encodeAssociativeArray3(v.(ECMAArray))
+	case []interface{}:
+		return encodeStrictArray3(v.([]interface{}))
 	}
 	return nil
 }
 
-func encodeU29(v int) []byte {
-	msg := make([]byte, 0, 4)
+func encodeU29(w io.Writer, v int) {
 	v &= 0x1fffffff
 	if v <= 0x7f {
-		msg = append(msg, byte(v))
+		w.Write([]byte{byte(v)})
 	} else if v <= 0x3fff {
-		msg = append(msg, byte((v>>7)|0x80))
-		msg = append(msg, byte(v&0x7f))
+		w.Write([]byte{byte((v>>7)|0x80), byte(v&0x7f)})
 	} else if v <= 0x1fffff {
-		msg = append(msg, byte((v>>14)|0x80))
-		msg = append(msg, byte((v>>7)|0x80))
-		msg = append(msg, byte(v&0x7f))
+		w.Write([]byte{byte((v>>14)|0x80), byte((v>>7)|0x80), byte(v&0x7f)})
 	} else {
-		msg = append(msg, byte((v>>22)|0x80))
-		msg = append(msg, byte((v>>14)|0x80))
-		msg = append(msg, byte((v>>7)|0x80))
-		msg = append(msg, byte(v))
+		w.Write([]byte{byte((v>>22)|0x80), byte((v>>14)|0x80), byte((v>>7)|0x80), byte(v)})
 	}
-	return msg
 }
 
 func encodeInteger3(v int) []byte {
 	if v >= amf3MinInt && v <= amf3MaxInt {
-		msg := make([]byte, 0, 1+4) // 1 header + up to 4 U29
-		msg = append(msg, amf3Integer)
-		msg = append(msg, encodeU29(v)...)
-		return msg
+		buf := new(bytes.Buffer)
+		buf.WriteByte(amf3Integer)
+		encodeU29(buf, v)
+		return buf.Bytes()
 	} else {
 		return encodeDouble3(float64(v))
 	}
@@ -80,30 +77,66 @@ func encodeBoolean3(v bool) []byte {
 	} else {
 		return []byte{amf3False}
 	}
-	return []byte{amf3False}
 }
 
 func encodeNull3() []byte {
 	return []byte{amf3Null}
 }
 
-func encodeString3(v string) []byte {
+func encodeUTF8VR(w io.Writer, v string) {
 	var strlen = len(v)
 	if strlen > amf3MaxInt {
 		strlen = amf3MaxInt
 	}
-	var msg []byte
-	msg = append(msg, amf3String)
-	msg = append(msg, encodeU29((strlen<<1)|1)...)
-	msg = append(msg, []byte(v)[:strlen]...)
-	return msg
+	encodeU29(w, (strlen<<1)|1)
+	w.Write([]byte(v))
+}
+
+func encodeString3(v string) []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf3String)
+	encodeUTF8VR(buf, v)
+	return buf.Bytes()
 }
 
 func encodeDate3(v time.Time) []byte {
-	msg := make([]byte, 0, 1+1+8) // 1 header + 1 U29 + 8 float64
-	msg = append(msg, amf3Date)
-	msg = append(msg, encodeU29(1)...)
-	msg = append(msg, []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}...)
-	binary.BigEndian.PutUint64(msg[2:], uint64(v.UnixNano()/1000000))
-	return msg
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf3Date)
+	encodeU29(buf, 1)
+	binary.Write(buf, binary.BigEndian, float64(v.UnixNano()/1000000))
+	return buf.Bytes()
+}
+
+func encodeAssociativeArray3(v ECMAArray) []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf3Array)
+	encodeU29(buf, 1)
+	var keys []string
+	for k := range v {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		b := EncodeAMF3(v[key])
+		if b != nil {
+			encodeUTF8VR(buf, key)
+			buf.Write(b)
+		}
+	}
+	buf.WriteByte(0x01)
+	return buf.Bytes()
+}
+
+func encodeStrictArray3(v []interface{}) []byte {
+	buf := new(bytes.Buffer)
+	buf.WriteByte(amf3Array)
+	encodeU29(buf, (len(v)<<1)|1)
+	buf.WriteByte(0x01)
+	for _, item := range v {
+		b := EncodeAMF3(item)
+		if b != nil {
+			buf.Write(b)
+		}
+	}
+	return buf.Bytes()
 }

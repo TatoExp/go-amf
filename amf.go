@@ -7,7 +7,7 @@ const (
 	AMF3 AMFVersion = 0x3
 )
 
-type Amf0ECMAArray map[string]interface{}
+type ECMAArray map[string]interface{}
 
 const (
 	amf0Number    byte = 0x00
@@ -15,6 +15,8 @@ const (
 	amf0String         = 0x02
 	amf0Object         = 0x03
 	amf0Null           = 0x05
+	amf0Undefined      = 0x06
+	amf0Reference      = 0x07
 	amf0Array          = 0x08
 	amf0ObjectEnd      = 0x09
 	amf0StrictArr      = 0x0a
