@@ -83,7 +83,7 @@ func decodeUTF8VR(v []byte) (string, int, error) {
 		return "", 0, fmt.Errorf("unsupported string ref")
 	}
 	strlen >>= 1
-	return string(v[l:l+strlen]), l + strlen, nil
+	return string(v[l : l+strlen]), l + strlen, nil
 }
 
 func decodeString3(v []byte) (string, int, error) {
@@ -91,14 +91,14 @@ func decodeString3(v []byte) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	return str, 1+nstr, nil
+	return str, 1 + nstr, nil
 }
 
 func decodeDate3(v []byte) (time.Time, int, error) {
 	if v[1] == 0 {
 		return time.Time{}, 10, fmt.Errorf("unsupported date ref")
 	}
-	t := int64(math.Float64frombits(binary.BigEndian.Uint64(v[2:10]))*1000000)
+	t := int64(math.Float64frombits(binary.BigEndian.Uint64(v[2:10])) * 1000000)
 	return time.Unix(0, t), 10, nil
 }
 
@@ -115,7 +115,7 @@ func decodeArray3(v []byte) (interface{}, int, error) {
 	if num == 1 {
 		return decodeAssociativeArray3(v, offset)
 	} else {
-		return decodeStrictArray3(v, offset, num >> 1)
+		return decodeStrictArray3(v, offset, num>>1)
 	}
 }
 

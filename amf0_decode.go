@@ -2,9 +2,9 @@ package amf
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 	"time"
-	"fmt"
 )
 
 func DecodeAMF0(v []byte) (interface{}, error) {
@@ -50,18 +50,18 @@ func decodeBoolean(v []byte) (bool, int, error) {
 
 func decodeUTF8(v []byte) (string, int) {
 	strlen := int(binary.BigEndian.Uint16(v[:2]))
-	s := string(v[2:2+strlen])
-	return s, 2+strlen
+	s := string(v[2 : 2+strlen])
+	return s, 2 + strlen
 }
 
 func decodeString(v []byte) (string, int, error) {
 	if v[0] == amf0String {
 		s, n := decodeUTF8(v[1:])
-		return s, 1+n, nil
+		return s, 1 + n, nil
 	} else if v[0] == amf0StringExt {
 		strlen := int(binary.BigEndian.Uint32(v[1:5]))
-		s := string(v[5:5+strlen])
-		return s, 5+strlen, nil
+		s := string(v[5 : 5+strlen])
+		return s, 5 + strlen, nil
 	} else {
 		return "", 0, fmt.Errorf("invalid string tag")
 	}
@@ -100,7 +100,7 @@ func decodeStrictArray(v []byte) ([]interface{}, int, error) {
 }
 
 func decodeDate(v []byte) (time.Time, int, error) {
-	t := int64(math.Float64frombits(binary.BigEndian.Uint64(v[1:9]))*1000000)
+	t := int64(math.Float64frombits(binary.BigEndian.Uint64(v[1:9])) * 1000000)
 	if v[9] != 0x00 || v[10] != 0x00 {
 		return time.Unix(0, 0), 0, fmt.Errorf("invalid timezone")
 	}

@@ -29,7 +29,7 @@ func EncodeAMF3(v interface{}) []byte {
 	case nil:
 		return encodeNull3()
 	// case map[string]interface{}:
-		// return encodeObject3(v.(map[string]interface{}))
+	// return encodeObject3(v.(map[string]interface{}))
 	case time.Time:
 		return encodeDate3(v.(time.Time))
 	case ECMAArray:
@@ -45,11 +45,11 @@ func encodeU29(w io.Writer, v int) {
 	if v <= 0x7f {
 		w.Write([]byte{byte(v)})
 	} else if v <= 0x3fff {
-		w.Write([]byte{byte((v>>7)|0x80), byte(v&0x7f)})
+		w.Write([]byte{byte((v >> 7) | 0x80), byte(v & 0x7f)})
 	} else if v <= 0x1fffff {
-		w.Write([]byte{byte((v>>14)|0x80), byte((v>>7)|0x80), byte(v&0x7f)})
+		w.Write([]byte{byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v & 0x7f)})
 	} else {
-		w.Write([]byte{byte((v>>22)|0x80), byte((v>>14)|0x80), byte((v>>7)|0x80), byte(v)})
+		w.Write([]byte{byte((v >> 22) | 0x80), byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v)})
 	}
 }
 
