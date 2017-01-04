@@ -104,6 +104,8 @@ func encodeECMAArray(v ECMAArray) []byte {
 		encodeUTF8(buf, key)
 		buf.Write(EncodeAMF0(value))
 	}
+	encodeUTF8(buf, "")
+	buf.WriteByte(amf0ObjectEnd)
 	return buf.Bytes()
 }
 

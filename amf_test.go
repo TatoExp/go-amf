@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"os/exec"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -64,12 +66,15 @@ func testDecode(t *testing.T, cases []decodeTestCase, decode decodeFunc, name st
 
 // Extern
 
-func testExtern(t *testing.T, cases []decodeTestCase, name string) {
+func testExtern(t *testing.T, cases []decodeTestCase, name string, version int) {
+	cmd := exec.Command("ruby", "amf_test_server.rb", strconv.Itoa(version))
+	cmd.Start()
+
 	conn, err := net.Dial("tcp", "localhost:4242")
 	if err != nil {
 		return
 	}
-	buffer := make([]byte, 128)
+	buffer := make([]byte, 256)
 	for _, c := range cases {
 		outdata := hex.EncodeToString(c.in)
 		conn.SetDeadline(time.Now().Add(time.Second))

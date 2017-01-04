@@ -124,6 +124,6 @@ func TestDecodeAMF3(t *testing.T) {
 	testDecode(t, decodeCases3, decodeAMF3, "TestDecodeAMF3")
 }
 
-func TestExternAMF3(t *testing.T) {
-	testExtern(t, decodeCases3, "TestExternAMF3")
-}
+// func TestExternAMF3(t *testing.T) {
+// 	testExtern(t, decodeCases3, "TestExternAMF3", 3)
+// }

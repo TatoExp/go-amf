@@ -81,7 +81,7 @@ func decodeECMAArray(v []byte) (ECMAArray, int, error) {
 		offset += nvalue
 		result[key] = value
 	}
-	return ECMAArray(result), offset, nil
+	return ECMAArray(result), offset + 3, nil
 }
 
 func decodeStrictArray(v []byte) ([]interface{}, int, error) {
