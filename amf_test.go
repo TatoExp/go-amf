@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"io"
 	"net"
-	"reflect"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"testing"
 	"time"
@@ -19,13 +19,20 @@ type encodeTestCase struct {
 	want []byte
 }
 
-type encodeFunc func(interface{}) []byte
+type encodeFunc func(io.Writer, interface{}) (int, error)
 
 func testEncode(t *testing.T, cases []encodeTestCase, encode encodeFunc, name string) {
 	for _, c := range cases {
-		got := encode(c.in)
-		if bytes.Compare(got, c.want) != 0 {
-			t.Errorf("%s(%#v) == %#v (%d), want %#v (%d)", name, c.in, got, len(got), c.want, len(c.want))
+		buf := &bytes.Buffer{}
+		n, err := encode(buf, c.in)
+		if err != nil {
+			t.Error(err)
+		}
+		if n != buf.Len() {
+			t.Errorf("%s len got %d, want %d", name, n, buf.Len())
+		}
+		if bytes.Compare(buf.Bytes(), c.want) != 0 {
+			t.Errorf("%s(%#v) == %#v (%d), want %#v (%d)", name, c.in, buf.Bytes(), buf.Len(), c.want, len(c.want))
 		}
 	}
 }

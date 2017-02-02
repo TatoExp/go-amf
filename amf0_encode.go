@@ -1,76 +1,91 @@
 package amf
 
 import (
-	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"sort"
 	"time"
 )
 
-func EncodeAMF0(v interface{}) []byte {
+func EncodeAMF0(w io.Writer, v interface{}) (int, error) {
+	return encodeAMF0(0, w, v)
+}
+
+func encodeAMF0(n int, w io.Writer, v interface{}) (int, error) {
 	switch v.(type) {
 	case float64:
-		return encodeNumber(v.(float64))
+		return encodeNumber(n, w, v.(float64))
 	case int:
-		return encodeNumber(float64(v.(int)))
+		return encodeNumber(n, w, float64(v.(int)))
 	case bool:
-		return encodeBoolean(v.(bool))
+		return encodeBoolean(n, w, v.(bool))
 	case string:
-		return encodeString(v.(string))
+		return encodeString(n, w, v.(string))
 	case nil:
-		return encodeNull()
+		return encodeNull(n, w)
 	case map[string]interface{}:
-		return encodeObject(v.(map[string]interface{}))
+		return encodeObject(n, w, v.(map[string]interface{}))
 	case ECMAArray:
-		return encodeECMAArray(v.(ECMAArray))
+		return encodeECMAArray(n, w, v.(ECMAArray))
 	case time.Time:
-		return encodeDate(v.(time.Time))
+		return encodeDate(n, w, v.(time.Time))
 	case []interface{}:
-		return encodeStrictArray(v.([]interface{}))
+		return encodeStrictArray(n, w, v.([]interface{}))
 	}
-	return nil
+	return n, fmt.Errorf("type %T not supported", v)
 }
 
-func encodeNumber(v float64) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf0Number)
-	binary.Write(buf, binary.BigEndian, v)
-	return buf.Bytes()
+func encodeNumber(n int, w io.Writer, v float64) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf0Number})
+	if err != nil {
+		return n, err
+	}
+	return writeData(n, w, binary.BigEndian, v)
 }
 
-func encodeBoolean(v bool) []byte {
-	msg := make([]byte, 1+1) // 1 header + 1 boolean
-	msg[0] = amf0Boolean
+func encodeBoolean(n int, w io.Writer, v bool) (int, error) {
 	if v {
-		msg[1] = 0x1
+		return writeBytes(n, w, []byte{amf0Boolean, 0x1})
 	} else {
-		msg[1] = 0x0
+		return writeBytes(n, w, []byte{amf0Boolean, 0x0})
 	}
-	return msg
 }
 
-func encodeUTF8(w io.Writer, v string) {
-	binary.Write(w, binary.BigEndian, uint16(len(v)))
-	w.Write([]byte(v))
+func encodeUTF8(n int, w io.Writer, v string) (int, error) {
+	var err error
+	n, err = writeData(n, w, binary.BigEndian, uint16(len(v)))
+	if err != nil {
+		return n, err
+	}
+	return writeBytes(n, w, []byte(v))
 }
 
-func encodeString(v string) []byte {
-	buf := new(bytes.Buffer)
+func encodeString(n int, w io.Writer, v string) (int, error) {
 	if len(v) < 0xffff {
-		buf.WriteByte(amf0String)
-		encodeUTF8(buf, v)
+		n, err := writeBytes(n, w, []byte{amf0String})
+		if err != nil {
+			return n, err
+		}
+		return encodeUTF8(n, w, v)
 	} else {
-		buf.WriteByte(amf0StringExt)
-		binary.Write(buf, binary.BigEndian, uint32(len(v)))
-		buf.Write([]byte(v))
+		n, err := writeBytes(n, w, []byte{amf0StringExt})
+		if err != nil {
+			return n, err
+		}
+		n, err = writeData(n, w, binary.BigEndian, uint32(len(v)))
+		if err != nil {
+			return n, err
+		}
+		return writeBytes(n, w, []byte(v))
 	}
-	return buf.Bytes()
 }
 
-func encodeObject(v map[string]interface{}) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf0Object)
+func encodeObject(n int, w io.Writer, v map[string]interface{}) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf0Object})
+	if err != nil {
+		return n, err
+	}
 	var keys []string
 	for k := range v {
 		keys = append(keys, k)
@@ -78,52 +93,84 @@ func encodeObject(v map[string]interface{}) []byte {
 	sort.Strings(keys)
 	for _, key := range keys {
 		value := v[key]
-		encodeUTF8(buf, key)
-		buf.Write(EncodeAMF0(value))
+		n, err = encodeUTF8(n, w, key)
+		if err != nil {
+			return n, err
+		}
+		n, err = encodeAMF0(n, w, value)
+		if err != nil {
+			return n, err
+		}
 	}
-	encodeUTF8(buf, "")
-	buf.WriteByte(amf0ObjectEnd)
-	return buf.Bytes()
+	n, err = encodeUTF8(n, w, "")
+	if err != nil {
+		return n, err
+	}
+	return writeBytes(n, w, []byte{amf0ObjectEnd})
 }
 
-func encodeNull() []byte {
-	return []byte{amf0Null}
+func encodeNull(n int, w io.Writer) (int, error) {
+	return writeBytes(n, w, []byte{amf0Null})
 }
 
-func encodeECMAArray(v ECMAArray) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf0Array)
+func encodeECMAArray(n int, w io.Writer, v ECMAArray) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf0Array})
+	if err != nil {
+		return n, err
+	}
 	var keys []string
 	for k := range v {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	binary.Write(buf, binary.BigEndian, uint32(len(keys)))
+	n, err = writeData(n, w, binary.BigEndian, uint32(len(keys)))
+	if err != nil {
+		return n, err
+	}
 	for _, key := range keys {
 		value := v[key]
-		encodeUTF8(buf, key)
-		buf.Write(EncodeAMF0(value))
+		n, err = encodeUTF8(n, w, key)
+		if err != nil {
+			return n, err
+		}
+		n, err = encodeAMF0(n, w, value)
+		if err != nil {
+			return n, err
+		}
 	}
-	encodeUTF8(buf, "")
-	buf.WriteByte(amf0ObjectEnd)
-	return buf.Bytes()
+	n, err = encodeUTF8(n, w, "")
+	if err != nil {
+		return n, err
+	}
+	return writeBytes(n, w, []byte{amf0ObjectEnd})
 }
 
-func encodeDate(v time.Time) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf0Date)
-	binary.Write(buf, binary.BigEndian, float64(v.UnixNano()/1000000))
-	buf.WriteByte(0x00)
-	buf.WriteByte(0x00)
-	return buf.Bytes()
+func encodeDate(n int, w io.Writer, v time.Time) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf0Date})
+	if err != nil {
+		return n, err
+	}
+	n, err = writeData(n, w, binary.BigEndian, float64(v.UnixNano()/1000000))
+	if err != nil {
+		return n, err
+	}
+	return writeBytes(n, w, []byte{0x00, 0x00})
 }
 
-func encodeStrictArray(v []interface{}) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf0StrictArr)
-	binary.Write(buf, binary.BigEndian, uint32(len(v)))
+func encodeStrictArray(n int, w io.Writer, v []interface{}) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf0StrictArr})
+	if err != nil {
+		return n, err
+	}
+	n, err = writeData(n, w, binary.BigEndian, uint32(len(v)))
+	if err != nil {
+		return n, err
+	}
 	for _, value := range v {
-		buf.Write(EncodeAMF0(value))
+		n, err = encodeAMF0(n, w, value)
+		if err != nil {
+			return n, err
+		}
 	}
-	return buf.Bytes()
+	return n, err
 }

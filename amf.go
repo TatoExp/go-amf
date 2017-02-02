@@ -1,5 +1,10 @@
 package amf
 
+import (
+	"encoding/binary"
+	"io"
+)
+
 type AMFVersion uint8
 
 const (
@@ -41,3 +46,14 @@ const (
 	amf3VectorDouble      = 0x0d
 	amf3VectorObject      = 0x0d
 )
+
+func writeBytes(n int, w io.Writer, data []byte) (int, error) {
+	newn, err := w.Write(data)
+	return n + newn, err
+}
+
+func writeData(n int, w io.Writer, order binary.ByteOrder, data interface{}) (int, error) {
+	err := binary.Write(w, order, data)
+	newn := binary.Size(data)
+	return n + newn, err
+}

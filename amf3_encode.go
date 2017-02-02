@@ -1,8 +1,8 @@
 package amf
 
 import (
-	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"sort"
@@ -14,129 +14,158 @@ const (
 	amf3MinInt = -268435456 // -(2^28)
 )
 
-func EncodeAMF3(v interface{}) []byte {
+func EncodeAMF3(w io.Writer, v interface{}) (int, error) {
+	return encodeAMF3(0, w, v)
+}
+
+func encodeAMF3(n int, w io.Writer, v interface{}) (int, error) {
 	switch v.(type) {
 	case float64:
-		return encodeDouble3(v.(float64))
+		return encodeDouble3(n, w, v.(float64))
 	case int:
-		return encodeInteger3(v.(int))
+		return encodeInteger3(n, w, v.(int))
 	case uint:
-		return encodeInteger3(v.(int))
+		return encodeInteger3(n, w, v.(int))
 	case bool:
-		return encodeBoolean3(v.(bool))
+		return encodeBoolean3(n, w, v.(bool))
 	case string:
-		return encodeString3(v.(string))
+		return encodeString3(n, w, v.(string))
 	case nil:
-		return encodeNull3()
+		return encodeNull3(n, w)
 	// case map[string]interface{}:
-	// return encodeObject3(v.(map[string]interface{}))
+	// return encodeObject3(n, w, v.(map[string]interface{}))
 	case time.Time:
-		return encodeDate3(v.(time.Time))
+		return encodeDate3(n, w, v.(time.Time))
 	case ECMAArray:
-		return encodeAssociativeArray3(v.(ECMAArray))
+		return encodeAssociativeArray3(n, w, v.(ECMAArray))
 	case []interface{}:
-		return encodeStrictArray3(v.([]interface{}))
+		return encodeStrictArray3(n, w, v.([]interface{}))
 	}
-	return nil
+	return n, fmt.Errorf("type %T not supported", v)
 }
 
-func encodeU29(w io.Writer, v int) {
+func encodeU29(n int, w io.Writer, v int) (int, error) {
 	v &= 0x1fffffff
 	if v <= 0x7f {
-		w.Write([]byte{byte(v)})
+		return writeBytes(n, w, []byte{byte(v)})
 	} else if v <= 0x3fff {
-		w.Write([]byte{byte((v >> 7) | 0x80), byte(v & 0x7f)})
+		return writeBytes(n, w, []byte{byte((v >> 7) | 0x80), byte(v & 0x7f)})
 	} else if v <= 0x1fffff {
-		w.Write([]byte{byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v & 0x7f)})
+		return writeBytes(n, w, []byte{byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v & 0x7f)})
 	} else {
-		w.Write([]byte{byte((v >> 22) | 0x80), byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v)})
+		return writeBytes(n, w, []byte{byte((v >> 22) | 0x80), byte((v >> 14) | 0x80), byte((v >> 7) | 0x80), byte(v)})
 	}
 }
 
-func encodeInteger3(v int) []byte {
+func encodeInteger3(n int, w io.Writer, v int) (int, error) {
 	if v >= amf3MinInt && v <= amf3MaxInt {
-		buf := new(bytes.Buffer)
-		buf.WriteByte(amf3Integer)
-		encodeU29(buf, v)
-		return buf.Bytes()
+		n, err := writeBytes(n, w, []byte{amf3Integer})
+		if err != nil {
+			return n, err
+		}
+		return encodeU29(n, w, v)
 	} else {
-		return encodeDouble3(float64(v))
+		return encodeDouble3(n, w, float64(v))
 	}
 }
 
-func encodeDouble3(v float64) []byte {
-	msg := make([]byte, 1+8) // 1 header + 8 float64
-	msg[0] = amf3Double
-	binary.BigEndian.PutUint64(msg[1:], uint64(math.Float64bits(v)))
-	return msg
+func encodeDouble3(n int, w io.Writer, v float64) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf3Double})
+	if err != nil {
+		return n, err
+	}
+	return writeData(n, w, binary.BigEndian, uint64(math.Float64bits(v)))
 }
 
-func encodeBoolean3(v bool) []byte {
+func encodeBoolean3(n int, w io.Writer, v bool) (int, error) {
 	if v {
-		return []byte{amf3True}
+		return writeBytes(n, w, []byte{amf3True})
 	} else {
-		return []byte{amf3False}
+		return writeBytes(n, w, []byte{amf3False})
 	}
 }
 
-func encodeNull3() []byte {
-	return []byte{amf3Null}
+func encodeNull3(n int, w io.Writer) (int, error) {
+	return writeBytes(n, w, []byte{amf3Null})
 }
 
-func encodeUTF8VR(w io.Writer, v string) {
+func encodeUTF8VR(n int, w io.Writer, v string) (int, error) {
 	var strlen = len(v)
 	if strlen > amf3MaxInt {
 		strlen = amf3MaxInt
 	}
-	encodeU29(w, (strlen<<1)|1)
-	w.Write([]byte(v))
+	n, err := encodeU29(n, w, (strlen<<1)|1)
+	if err != nil {
+		return n, err
+	}
+	return writeBytes(n, w, []byte(v))
 }
 
-func encodeString3(v string) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf3String)
-	encodeUTF8VR(buf, v)
-	return buf.Bytes()
+func encodeString3(n int, w io.Writer, v string) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf3String})
+	if err != nil {
+		return n, err
+	}
+	return encodeUTF8VR(n, w, v)
 }
 
-func encodeDate3(v time.Time) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf3Date)
-	encodeU29(buf, 1)
-	binary.Write(buf, binary.BigEndian, float64(v.UnixNano()/1000000))
-	return buf.Bytes()
+func encodeDate3(n int, w io.Writer, v time.Time) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf3Date})
+	if err != nil {
+		return n, err
+	}
+	n, err = encodeU29(n, w, 1)
+	if err != nil {
+		return n, err
+	}
+	return writeData(n, w, binary.BigEndian, float64(v.UnixNano()/1000000))
 }
 
-func encodeAssociativeArray3(v ECMAArray) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf3Array)
-	encodeU29(buf, 1)
+func encodeAssociativeArray3(n int, w io.Writer, v ECMAArray) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf3Array})
+	if err != nil {
+		return n, err
+	}
+	n, err = encodeU29(n, w, 1)
+	if err != nil {
+		return n, err
+	}
 	var keys []string
 	for k := range v {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		b := EncodeAMF3(v[key])
-		if b != nil {
-			encodeUTF8VR(buf, key)
-			buf.Write(b)
+		n, err = encodeUTF8VR(n, w, key)
+		if err != nil {
+			return n, err
+		}
+		n, err = encodeAMF3(n, w, v[key])
+		if err != nil {
+			return n, err
 		}
 	}
-	buf.WriteByte(0x01)
-	return buf.Bytes()
+	return writeBytes(n, w, []byte{0x01})
 }
 
-func encodeStrictArray3(v []interface{}) []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(amf3Array)
-	encodeU29(buf, (len(v)<<1)|1)
-	buf.WriteByte(0x01)
+func encodeStrictArray3(n int, w io.Writer, v []interface{}) (int, error) {
+	n, err := writeBytes(n, w, []byte{amf3Array})
+	if err != nil {
+		return n, err
+	}
+	n, err = encodeU29(n, w, (len(v)<<1)|1)
+	if err != nil {
+		return n, err
+	}
+	n, err = writeBytes(n, w, []byte{0x01})
+	if err != nil {
+		return n, err
+	}
 	for _, item := range v {
-		b := EncodeAMF3(item)
-		if b != nil {
-			buf.Write(b)
+		n, err = encodeAMF3(n, w, item)
+		if err != nil {
+			return n, err
 		}
 	}
-	return buf.Bytes()
+	return n, err
 }
