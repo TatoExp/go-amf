@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-func DecodeAMF0(v []byte) (interface{}, error) {
-	result, _, err := decodeAMF0(v)
-	return result, err
+func DecodeAMF0(v []byte) (interface{}, int, error) {
+	result, length, err := decodeAMF0(v)
+	return result, length, err
 }
 
 func decodeAMF0(v []byte) (interface{}, int, error) {
